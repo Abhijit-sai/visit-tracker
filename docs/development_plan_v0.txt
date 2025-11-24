@@ -1,0 +1,490 @@
+Visitor Management App – Development Plan (v1)
+0. Context & Constraints
+•	Target org: Single company with 2 branches (but architecture should be multi-tenant ready).
+•	Backend & DB: Supabase (Postgres, Auth, Storage, Edge Functions).
+•	Auth:
+o	Admins: Supabase Auth – full dashboard access.
+o	Visitors: Supabase Auth (email OTP/magic link) for email verification only.
+o	Employees: No login; they approve via secure email links.
+•	Notifications: Email only for v1 (visitor verification + host approval + optional admin notifications). SMS later.
+•	Retention: Data stored indefinitely (no auto-purge).
+•	New requirements:
+o	Track check-in and check-out times, separate from validity.
+o	Support manual walk-in without email verification, where security manually verifies ID and approves.
+o	For certain employees (high grade), host approval is mandatory, even for walk-ins.
+o	Visitors cannot edit visits; they may get a view-only status page via link.
+________________________________________
+1. Tech Stack
+Frontend
+•	Framework: Next.js (App Router) + TypeScript
+•	UI: React, Tailwind CSS
+•	State management: React Query / TanStack Query for server state
+•	Form handling: React Hook Form + Zod for validation
+•	Deployment: Vercel (or similar)
+Backend / Infra
+•	Supabase
+o	Postgres (core DB)
+o	Supabase Auth (email OTP / magic links)
+o	Storage (visitor photos & ID images)
+o	Edge Functions (for approval links, auto-cancel jobs, etc.)
+o	Cron (for auto-cancel & daily summaries)
+________________________________________
+2. High-Level Architecture
+Apps / Modules
+1.	Admin Dashboard (Next.js app)
+o	Route prefix: /admin
+o	Protected by Supabase Auth (Admin role only)
+o	Features:
+	Branch management
+	Config management
+	Employee directory
+	Visits list + detail
+	Check-in / Check-out actions
+	Analytics & export
+	Email template management
+2.	Request/Kiosk Module
+o	Route prefix: /visit (public)
+o	Embedded in a tablet at reception
+o	Features:
+	New visit creation (visitor flow)
+	Visitor email verification screen (OTP input if using OTP)
+	Success/pending screens
+3.	Public Visit View (Read-only)
+o	Route pattern: /v/[public_id]
+o	Shows visit summary & current status
+o	Read-only; used from emails to let visitor check status
+4.	Edge Functions
+o	/approve-visit – handles host approval via secure link
+o	/decline-visit – handles host decline via secure link
+o	/cron-auto-cancel – auto-cancels incomplete visits
+________________________________________
+3. Data Model (DB Schema)
+3.1. Core Tables
+organizations
+For v1, there will be exactly one row, but structure is multi-tenant ready.
+•	id (uuid, PK)
+•	name (text)
+•	slug (text, unique)
+•	created_at (timestamptz)
+branches
+•	id (uuid, PK)
+•	organization_id (uuid, FK → organizations.id)
+•	name (text)
+•	code (text, e.g., “HYD-HO”)
+•	address (text)
+•	is_active (boolean, default true)
+•	created_at (timestamptz)
+admins
+Mapped to Supabase auth.users.
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	auth_user_id (uuid, FK → auth.users.id)
+•	name (text)
+•	email (text, unique within organization)
+•	role (text, default 'ADMIN')
+•	created_at (timestamptz)
+employees
+Host directory (people visitors can meet).
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	branch_id (uuid, FK → branches.id, nullable if org-level)
+•	name (text)
+•	designation (text)
+•	email (text)
+•	phone (text)
+•	requires_host_approval (boolean, default false)
+When true, visitor must get host approval before entering, even for manual walk-ins.
+•	is_active (boolean, default true)
+•	created_at (timestamptz)
+visitors
+Optional mapping to Supabase Auth, but we treat them mostly as data records.
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	full_name (text)
+•	company (text)
+•	designation (text)
+•	email (text)
+•	phone (text)
+•	email_verified_at (timestamptz, nullable)
+•	auth_user_id (uuid, FK → auth.users.id, nullable)
+•	created_at (timestamptz)
+visits
+Each visit request for a visitor.
+•	id (uuid, PK)
+•	public_id (text, unique, short id used in public URL like /v/ABC123)
+•	organization_id (uuid, FK)
+•	branch_id (uuid, FK → branches.id)
+•	visitor_id (uuid, FK → visitors.id)
+•	host_employee_id (uuid, FK → employees.id)
+•	purpose (text)
+•	purpose_other (text, nullable)
+•	scheduled_start_at (timestamptz)
+“Visiting time” – either “now” or future datetime.
+•	validity_type (text enum: 'DURATION' | 'UNTIL_DATE')
+•	validity_hours (integer, nullable; used when type = 'DURATION', e.g., 1, 4, 12, 24)
+•	valid_until (timestamptz, nullable; derived from scheduled_start_at + validity_hours or explicit “valid till” date)
+•	additional_visitor_count (integer, default 0)
+•	additional_visitor_names (text, nullable; comma-separated or JSON)
+•	status (text enum):
+o	'INCOMPLETE_PROFILE'
+o	'PENDING_VERIFICATION'
+o	'PENDING_APPROVAL'
+o	'APPROVED'
+o	'DECLINED'
+o	'CANCELLED'
+•	status_reason (text, nullable)
+•	requires_host_approval (boolean, derived at creation)
+•	email_verification_required (boolean, per-visit flag)
+•	is_manual_verification (boolean, default false)
+True when security manually verifies ID & skips email OTP.
+•	checkin_at (timestamptz, nullable)
+•	checkout_at (timestamptz, nullable)
+•	created_by_type (text enum: 'VISITOR' | 'ADMIN')
+•	created_by_admin_id (uuid, nullable)
+•	created_at (timestamptz)
+•	updated_at (timestamptz)
+visit_status_history
+Audit trail for all state changes.
+•	id (uuid, PK)
+•	visit_id (uuid, FK → visits.id)
+•	from_status (text)
+•	to_status (text)
+•	changed_by_type (text enum: 'SYSTEM' | 'ADMIN' | 'HOST' | 'VISITOR')
+•	changed_by_admin_id (uuid, nullable)
+•	changed_by_host_email (text, nullable)
+•	note (text, nullable)
+•	created_at (timestamptz)
+attachments
+Visitor photos & ID/visiting-card images.
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	visit_id (uuid, FK → visits.id)
+•	visitor_id (uuid, FK → visitors.id)
+•	type (text enum: 'VISITOR_PHOTO' | 'ID_PHOTO')
+•	storage_path (text)
+Path in Supabase Storage bucket.
+•	created_at (timestamptz)
+3.2. Config & Templates
+organization_config
+Global config for an org (one row per org).
+•	organization_id (uuid, PK, FK → organizations.id)
+•	approval_required (boolean, default true)
+Global default. For some hosts, requires_host_approval overrides behaviour.
+•	approval_recipient (text enum: 'HOST' | 'SECURITY_EMAIL' | 'BOTH')
+•	security_email (text, nullable)
+•	email_verification_required (boolean, default true)
+•	allow_manual_walkin (boolean, default true)
+•	auto_cancel_incomplete_after_hours (integer, default 24)
+•	default_validity_options (jsonb)
+e.g. [1, 4, 12, 24] hours.
+field_config
+Controls which fields are visible/required.
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	field_key (text)
+e.g. 'visitor.company', 'visitor.designation', 'visit.purpose_other', 'visitor.id_photo'.
+•	is_visible (boolean, default true)
+•	is_required (boolean, default false)
+•	help_text (text, nullable)
+email_templates
+•	id (uuid, PK)
+•	organization_id (uuid, FK)
+•	type (text enum):
+o	'VISITOR_VERIFICATION'
+o	'HOST_APPROVAL_REQUEST'
+o	'VISIT_APPROVED_VISITOR'
+o	'VISIT_DECLINED_VISITOR'
+•	subject (text)
+•	body (text)
+Supports placeholders like {{visitor_name}}, {{host_name}}, {{visit_time}}, {{branch_name}}, {{status_page_url}}.
+•	is_active (boolean, default true)
+________________________________________
+4. Auth & Permissions
+4.1. Admin Authentication
+•	Use Supabase Auth email/password or magic link.
+•	On first login, create a row in admins linked to auth_user_id.
+•	RLS on all org-linked tables:
+o	admins.organization_id is the scope for reads/writes.
+4.2. Visitor Email Verification
+Two options; pick one for v1 (simpler: magic-link):
+•	When visitor submits visit:
+o	Create visitors row.
+o	Create visits row with status = 'PENDING_VERIFICATION'.
+o	If email_verification_required = true:
+	Send verification email with signed link to a public route (e.g. /visit/verify?token=...).
+	That route calls an Edge Function to:
+	Validate token.
+	Set visitors.email_verified_at = now().
+	Transition visit to:
+	PENDING_APPROVAL if approval needed.
+	APPROVED if no approval needed.
+	Log in visit_status_history.
+4.3. Host Approval Links
+•	Approval email contains two signed links:
+o	Approve: /functions/v1/approve-visit?token=...
+o	Decline: /functions/v1/decline-visit?token=...
+•	Edge function verifies:
+o	Token validity (visit id, host email, expiry).
+o	Host email matches employees.email for the host_employee_id.
+•	On approve:
+o	If email verification was required and not done, option: either block or allow as special case (for v1, keep simple: email verification still required unless manual walk-in).
+o	Set status = 'APPROVED'.
+o	Log status history with changed_by_type = 'HOST'.
+________________________________________
+5. Core Business Logic
+5.1. Determining if Approval Is Required
+At visit creation:
+•	Read global config:
+o	approval_required (true/false).
+•	Read host settings:
+o	employees.requires_host_approval.
+•	Compute requires_host_approval for the visit as:
+requires_host_approval =
+  employees.requires_host_approval
+  OR organization_config.approval_required
+•	Use this flag to decide:
+o	If email_verification_required is true:
+	Flow = PENDING_VERIFICATION → PENDING_APPROVAL → APPROVED.
+o	If email_verification_required is false (manual walk-in case):
+	Flow = APPROVED (maybe with or without host approval depending on requires_host_approval).
+5.2. Manual Walk-In (Security-Approved)
+Admin (security) uses dashboard to:
+1.	Create a new visit (as created_by_type = 'ADMIN', created_by_admin_id set).
+2.	Optionally skip email verification:
+o	Set email_verification_required = false.
+o	Set is_manual_verification = true.
+3.	If requires_host_approval = false:
+o	Immediately set status = 'APPROVED'.
+4.	If requires_host_approval = true:
+o	Still send approval email to host.
+o	Status = PENDING_APPROVAL until host approves.
+Status history is logged for all transitions.
+5.3. Check-in / Check-out Logic
+Admin/security uses actions on a visit:
+•	Check-in
+o	Preconditions:
+	status = 'APPROVED' and
+	now() ≤ valid_until.
+o	Action:
+	Set checkin_at = now() if null.
+	Optionally update status to 'APPROVED' still, or introduce 'CHECKED_IN' later (for v1, keep status as APPROVED and rely on timestamps).
+•	Check-out
+o	Action:
+	Set checkout_at = now() if null.
+For v1, keep status model simple. Use checkin_at and checkout_at as separate indicators.
+5.4. Auto-Cancel Incomplete Visits
+A scheduled Edge Function runs every X minutes:
+•	Query visits where:
+o	status = 'INCOMPLETE_PROFILE' AND
+o	created_at < now() - auto_cancel_incomplete_after_hours.
+•	For each:
+o	Set status = 'CANCELLED'.
+o	Set status_reason = 'Auto-cancelled due to incomplete profile timeout'.
+o	Log history (changed_by_type = 'SYSTEM').
+________________________________________
+6. API / Edge Function Contracts (High-Level)
+Lovable can implement as Next.js API routes or Supabase Edge Functions.
+6.1. Public Visit APIs
+1.	POST /api/visits
+o	Used by kiosk to create a new visit.
+o	Body:
+	Visitor info
+	Visit info
+	Branch Id
+	Additional visitors, etc.
+o	Behaviour:
+	Upsert visitor (by email + org).
+	Create visit with status:
+	'INCOMPLETE_PROFILE' if required fields missing.
+	'PENDING_VERIFICATION' otherwise.
+	Send verification email if email_verification_required = true.
+	Return:
+	visit_id, public_id, initial status.
+2.	POST /api/visits/:id/attach-photo
+o	Upload visitor photo (via signed URL or direct Storage upload).
+o	Creates attachments row with type 'VISITOR_PHOTO'.
+3.	POST /api/visits/:id/attach-id-photo
+o	Same as above, type 'ID_PHOTO'.
+4.	GET /api/visits/public/:public_id
+o	retrieves minimal info for public view page.
+6.2. Verification & Approval Functions
+5.	GET /functions/v1/verify-visitor-email?token=...
+o	Edge function.
+o	Input encoded in token: visit_id, visitor_email, expiry.
+o	On success:
+	Set email_verified_at.
+	Transition status:
+	PENDING_APPROVAL or APPROVED.
+	Redirect to a status page (optional).
+6.	GET /functions/v1/approve-visit?token=...
+7.	GET /functions/v1/decline-visit?token=...
+o	Approve/decline flows as described above.
+8.	POST /functions/v1/cron-auto-cancel
+o	Called by Supabase cron.
+o	Performs auto-cancel logic.
+6.3. Admin APIs
+9.	GET /api/admin/visits
+o	Query parameters:
+	date_from, date_to
+	branch_id
+	status
+	host_id
+o	Returns paginated list for dashboard.
+10.	GET /api/admin/visits/:id
+o	Returns full visit detail including attachments (URLs signed server-side).
+11.	PATCH /api/admin/visits/:id
+o	Allows admin to update:
+	purpose, purpose_other
+	scheduled_start_at, validity_hours, valid_until
+	status (approve/decline/cancel/manual walkin)
+	email_verification_required for manual walk-in
+	host_employee_id if necessary
+12.	POST /api/admin/visits/:id/checkin
+13.	POST /api/admin/visits/:id/checkout
+14.	GET /api/admin/branches
+15.	POST /api/admin/branches
+16.	PATCH /api/admin/branches/:id
+17.	GET /api/admin/employees
+18.	POST /api/admin/employees
+19.	PATCH /api/admin/employees/:id
+20.	POST /api/admin/employees/import-csv
+21.	GET /api/admin/config
+22.	PATCH /api/admin/config
+23.	GET /api/admin/field-config
+24.	PATCH /api/admin/field-config
+25.	GET /api/admin/email-templates
+26.	PATCH /api/admin/email-templates/:id
+27.	GET /api/admin/reports/export
+•	Returns CSV for selected date range and filters.
+________________________________________
+7. Frontend Pages & Components
+7.1. Kiosk / Request Module (/visit)
+1.	/visit
+o	Simple landing.
+o	Select branch (if multiple).
+o	Button: “New Visit”.
+2.	/visit/new?branch_id=...
+o	Multi-step form:
+	Step 1: Visitor details (name, company, designation, email, phone).
+	Step 2: Visit details (purpose, host, visit time, validity, additional visitors).
+	Step 3: Capture photos (visitor + optional ID).
+o	Dynamic fields based on field_config.
+3.	/visit/verify
+o	Screen where visitor can:
+	Read message: “We sent you a link to your official email. Please click that link to verify.”
+o	If using OTP variant:
+	Input field for OTP + submit.
+4.	/visit/success
+o	Shows status: PENDING_APPROVAL or APPROVED.
+7.2. Public Visit Status Page (/v/[public_id])
+•	Shows:
+o	Visitor name, host name, branch, date/time.
+o	Current status.
+o	Valid until.
+o	Read-only.
+7.3. Admin Dashboard (/admin)
+1.	/admin/login
+o	Supabase Auth sign-in.
+2.	/admin
+o	Summary dashboard:
+	Today’s visits.
+	Cards:
+	Total visits today.
+	Pending approvals.
+	Checked-in now.
+	Chart: visits by hour (today).
+3.	/admin/visits
+o	Table with filters.
+o	Columns as described earlier.
+o	Row actions: View / Approve / Decline / Cancel / Check-in / Check-out.
+4.	/admin/visits/[id]
+o	Full visit details.
+o	Timeline of statuses.
+o	Photos (visitor, ID).
+o	Actions.
+5.	/admin/config
+o	Forms for organization_config.
+o	Toggles:
+	Approval required.
+	Approval recipient.
+	Email verification required.
+	Allow manual walk-in.
+	Validity options.
+6.	/admin/field-config
+o	List of fields with visible and required toggles.
+7.	/admin/employees
+o	Table view + “Add employee”.
+o	Bulk upload.
+8.	/admin/branches
+o	Manage 2 branches.
+9.	/admin/email-templates
+o	Edit subject & body with preview.
+10.	/admin/reports
+o	Date range filter.
+o	High-level charts.
+o	Export button.
+________________________________________
+8. Milestones (for Implementation)
+Milestone 1 – Supabase Setup & Schema
+•	Create Supabase project.
+•	Define schema for:
+o	organizations, branches, admins, employees
+o	visitors, visits, visit_status_history
+o	attachments, organization_config, field_config, email_templates
+•	Implement RLS policies:
+o	Admins scoped by organization_id.
+o	Public (kiosk) allowed to create visits/visitors but read only minimal fields (or none).
+•	Seed data:
+o	One organization.
+o	Two branches.
+o	One admin user.
+Milestone 2 – Admin Auth & Skeleton Dashboard
+•	Integrate Supabase Auth in Next.js.
+•	Build /admin/login, /admin skeleton.
+•	Show “Today’s visits” with dummy data.
+Milestone 3 – Visit Creation Flow (Backend + Public UI)
+•	Implement POST /api/visits.
+•	Build /visit/new multi-step form.
+•	Implement file upload to Supabase Storage for photos.
+•	Implement attachments creation.
+•	Store visits with INCOMPLETE_PROFILE or PENDING_VERIFICATION.
+Milestone 4 – Email Verification Flow
+•	Implement email template for VISITOR_VERIFICATION.
+•	Implement Edge Function verify-visitor-email.
+•	Wire verification link into email.
+•	On verification:
+o	Update visitor & visit.
+o	Move to PENDING_APPROVAL or APPROVED.
+Milestone 5 – Host Approval Flow
+•	Implement email template HOST_APPROVAL_REQUEST.
+•	Implement Edge Functions approve-visit and decline-visit.
+•	For visits needing approval:
+o	Send host email after visitor verification (or after manual creation by admin).
+o	Update visit status based on host action.
+Milestone 6 – Manual Walk-In (Admin Flow)
+•	In /admin/visits/new (or /admin/visits/create):
+o	Allow admin to create a visit.
+o	Toggle “Manual verification (skip email OTP)”.
+•	When “Manual” is checked:
+o	Set email_verification_required = false.
+o	Set is_manual_verification = true.
+o	If host does not require approval:
+	Immediately mark as APPROVED.
+Milestone 7 – Check-in / Check-out
+•	Add Check-in & Check-out buttons in visit detail.
+•	Implement /api/admin/visits/:id/checkin and :id/checkout.
+•	Update timestamps & show them in admin UI.
+Milestone 8 – Auto-Cancel & Cron
+•	Implement Edge Function cron-auto-cancel.
+•	Hook up Supabase cron to call it every hour.
+•	Verify transitions of stale INCOMPLETE_PROFILE visits to CANCELLED.
+Milestone 9 – Config, Field Config & Templates UI
+•	Build /admin/config, /admin/field-config, /admin/email-templates.
+•	Make kiosk form dynamic based on field_config.
+Milestone 10 – Reports & Export
+•	Implement /admin/reports page with:
+o	Filters.
+o	Simple charts (visits by date, by host).
+•	Implement GET /api/admin/reports/export (CSV download).
+•	Test for at least a month of simulated data.
+

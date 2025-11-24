@@ -1,0 +1,371 @@
+Project Plan (v0.1)
+Phase 0 – Scope Lock & Success Metrics
+Goals
+•	Lock v1 scope (exact flows & screens).
+•	Define what “success” means for first deployment.
+Key decisions (proposed)
+•	Scope limited to:
+o	One company, 2 branches.
+o	Web-only (no native apps).
+o	Single admin role (no role hierarchy yet).
+o	No badge-printing / QR-gate integrations in v1.
+•	Success metrics:
+o	Time to create + verify + approve a visit.
+o	% of visits successfully verified via email.
+o	Admin satisfaction: can export data & see clear day-level visit logs.
+________________________________________
+Phase 1 – High-Level Architecture & Data Model
+Output
+•	Architecture diagram:
+o	Frontend: React / Next.js (Admin + Request Module)
+o	Backend: Supabase (Postgres, Auth, Storage, Edge Functions).
+o	Email: Supabase + provider (e.g., SMTP / Mailgun / SendGrid).
+•	ERD for:
+o	company, branch, admin_user
+o	employee (host directory)
+o	visitor, visit, visit_status_history
+o	config (company-level settings), email_template
+o	attachment (photos: visitor, ID/cards)
+This is still conceptual; implementation is all within Supabase’s Postgres.
+________________________________________
+Phase 2 – Supabase Setup
+Tasks
+•	Create Supabase project.
+•	Define DB schema (SQL migrations / Supabase SQL editor).
+•	Configure:
+o	Auth (email OTP & magic link).
+o	Storage buckets:
+	visitor-photos
+	id-photos
+•	Configure RLS (Row Level Security):
+o	Admins can see only their company’s data.
+o	Public/kiosk side can create/update only limited visitor + visit records.
+o	Email links have short-lived tokens with constrained permissions (for approvals).
+Deliverables
+•	SQL schema v1.
+•	Documented RLS policies.
+•	Test scripts for basic CRUD operations.
+________________________________________
+Phase 3 – Core Backend Logic (Edge Functions / DB-level)
+Core flows to implement
+1.	Create Visit (from Request Module)
+o	Insert visitor & visit in DB.
+o	Set initial status:
+	INCOMPLETE_PROFILE or PENDING_VERIFICATION depending on completeness.
+o	Trigger visitor verification email (OTP or magic link).
+2.	Verify Visitor Email
+o	Supabase Auth email OTP / magic link.
+o	On success: mark visitor email as verified.
+o	Move visit to PENDING_APPROVAL (if approval required), else APPROVED.
+3.	Host Approval (via Email Link)
+o	Email includes a secure token + minimal visit info.
+o	Host clicks Approve or Decline without logging in.
+o	Backend validates token → updates visit status & logs action.
+4.	Status Auto-updates
+o	Edge function / cron:
+	Auto-cancel:
+	Visits stuck in INCOMPLETE > 24 hours → CANCELLED.
+	Optional: PENDING_APPROVAL beyond X hours → EXPIRED/CANCELLED.
+5.	Admin CRUD
+o	APIs for admin:
+	List visits with filters.
+	Edit certain fields (e.g., purpose, scheduled time).
+	Manually approve/decline.
+	Manage employees.
+	Manage configs & email templates.
+________________________________________
+Phase 4 – Admin Dashboard (UI)
+Sections
+1.	Auth & Company Switch
+o	Admin login.
+o	(For v1 only one company, but structure for multiple later.)
+2.	Live Visits View
+o	Today’s visitors:
+	Cards/table: Visitor name, company, host, purpose, branch, status, time, validity.
+o	Filters: status, branch, time range.
+3.	Visit Details Page
+o	Full visitor + visit info.
+o	Photos (visitor + ID/card).
+o	Status timeline.
+o	Approve/Decline/Cancel actions.
+4.	Configuration
+o	Branch management:
+	Add/edit 2 branches.
+o	Field configuration:
+	Toggle mandatory/optional/hidden fields.
+o	Approval settings:
+	Approval required: yes/no.
+	Who should receive approval emails (host, generic “security” email, both).
+o	Validity settings:
+	Allowed options: 1h, 4h, 12h, 24h.
+	Max “valid till” date range.
+5.	Employee Directory
+o	CRUD: add/edit/remove employees.
+o	Bulk upload via CSV.
+6.	Email Templates
+o	Types:
+	Visitor verification email.
+	Host approval request.
+	Admin summary / notifications (optional v1).
+o	Template fields with placeholders (e.g., {{visitor_name}}, {{host_name}}, {{visit_time}}).
+7.	Reports & Export
+o	Date range + branch filters.
+o	Aggregates:
+	Visits by day/week/month.
+	Visits by purpose, host, visitor company.
+o	Export CSV of raw visit records.
+________________________________________
+Phase 5 – Request Module (Kiosk UI)
+Screens
+1.	Landing
+o	Logo + branch selector (if needed) OR auto-detected branch.
+o	“New Visit” button.
+2.	Visitor Details Form
+o	Step-by-step wizard:
+1.	Visitor info (name, company, designation).
+2.	Contact info (email, phone).
+3.	Visit info:
+	Purpose (drop-down + “other”).
+	Whom to meet (dropdown from employee directory).
+	Visit time (“Now”/schedule date & time).
+	Validity (1h/4h/12h/24h or validity date).
+	Additional visitors (count + names).
+4.	Photos:
+	Capture visitor photo using camera.
+	Capture optional ID/visiting card.
+o	Form validations based on current config (mandatory vs optional).
+3.	Email Verification Screen
+o	“We’ve sent a code/link to your work email.”
+o	Field to enter OTP (if we go OTP route).
+o	Resend logic.
+4.	Post-Verification Screen
+o	If approval required:
+	“Your visit is pending approval from [Host Name] / Security. You’ll be notified at [email].”
+o	If no approval:
+	“Your visit is approved. Valid until [time]. Please proceed to reception.”
+________________________________________
+Phase 6 – Testing & UAT
+•	Unit tests (core flows).
+•	Integration tests:
+o	Visitor creation → email → OTP → host approval → final status.
+•	UAT with real admins:
+o	Test multiple visits per day.
+o	Validate exports & reports.
+________________________________________
+Phase 7 – Deployment & Monitoring
+•	Deploy frontend (e.g., Vercel/Netlify).
+•	Supabase as backend.
+•	Basic monitoring / error tracking:
+o	Supabase logs.
+o	Frontend error logging (Sentry etc., optionally later).
+________________________________________
+2. PRD – Visitor Management System (v1)
+Below is a structured PRD you can drop into Notion/Confluence.
+________________________________________
+2.1. Product Overview
+Product name: (placeholder) VisitorFlow v1
+Company: Single firm (2 branches) for initial rollout
+Problem: Manual visitor logs (registers/Excel) are error-prone, hard to search, and offer no analytics or reliable verification.
+Solution: A web-based visitor management app that collects visitor information, verifies their official email, enforces configured approval rules, and gives admins a simple dashboard and analytics.
+________________________________________
+2.2. Goals & Non-Goals
+Goals
+•	Digitize visitor entry for 2 branches.
+•	Ensure only verified visitors are allowed.
+•	Allow configurable rules (required fields, approval rules).
+•	Provide admins with:
+o	Real-time view of visitors.
+o	Basic analytics and full data export.
+Non-Goals (v1)
+•	Badge printing or access control hardware integrations.
+•	Mobile apps (Android/iOS).
+•	Complex role-based access beyond a single admin role.
+•	Multi-company billing / subscription model.
+________________________________________
+2.3. User Roles
+1.	Visitor
+o	Creates a visit request.
+o	Verifies email.
+o	Comes on-site within validity.
+2.	Host (Employee)
+o	Does not log in.
+o	Receives email for approval.
+o	Approves/declines via a secure link.
+3.	Admin (for the firm)
+o	Logs into admin dashboard.
+o	Manages branches, employees, configs.
+o	Views and edits visits.
+o	Approves/declines if needed.
+o	Manages email templates.
+o	Exports data and views analytics.
+________________________________________
+2.4. Key User Journeys
+2.4.1. Walk-in Visitor
+1.	Visitor arrives at reception, uses kiosk.
+2.	Selects branch (if needed).
+3.	Fills visitor & visit details.
+4.	Captures photo (and ID/visiting card if required).
+5.	Submits → status: PENDING_VERIFICATION.
+6.	System sends verification email with OTP/link.
+7.	Visitor verifies email:
+o	If approval required:
+	Status → PENDING_APPROVAL.
+	Host gets email to approve.
+o	If no approval required:
+	Status → APPROVED.
+8.	Visitor is allowed entry within validity window.
+2.4.2. Pre-scheduled Visit (Optional v1, but structure ready)
+1.	Admin pre-creates a visit with date/time.
+2.	Visitor receives email to verify ahead of time.
+3.	On the day, visitor arrives and confirms at kiosk with reference code or email.
+4.	Status updated to “Checked-in” (future).
+2.4.3. Host Approval via Email
+1.	Host receives email:
+o	Key details: Visitor name, company, purpose, visit time, branch.
+o	Buttons: Approve, Decline.
+2.	Host clicks link.
+3.	System displays minimal page:
+o	Summary of visit.
+o	Confirm Approve/Decline.
+4.	On confirmation:
+o	Status updated appropriately.
+o	Visitor notified by email (optional for v1).
+2.4.4. Admin Monitoring
+1.	Admin logs into dashboard.
+2.	Sees:
+o	“Today’s visitors” table.
+o	Status filters.
+3.	Can:
+o	Manually approve/decline/withdraw.
+o	Edit visit details (purpose, time, validity).
+o	View photos and ID/card.
+________________________________________
+2.5. Functional Requirements
+2.5.1. Branch & Company Setup
+•	System supports:
+o	One company.
+o	Two branches.
+•	Admin can:
+o	Add/Edit branch name, address.
+o	Enable/disable a branch.
+2.5.2. Employee Directory (Host List)
+•	Admin can:
+o	Add employees (name, designation, email, contact number).
+o	Edit/remove employees.
+o	Bulk upload via CSV.
+•	Request UI:
+o	“Whom to meet?” dropdown loads from employee list.
+o	Optional search by name or email.
+2.5.3. Visitor & Visit Fields
+Visitor
+•	Name (required).
+•	Company / organization (configurable mandatory/optional).
+•	Designation (configurable).
+•	Official email (required).
+•	Phone number (configurable).
+•	Photo (configurable; strongly recommended required).
+Visit
+•	Purpose of visit (dropdown from admin-configured list + “Other” text).
+•	Host (required; from employee list).
+•	Visit time:
+o	Now or scheduled datetime.
+•	Validity:
+o	Pre-set options: 1h, 4h, 12h, 24h.
+o	“Valid till” date picker (optional branch-specific config).
+•	Additional visitors:
+o	Count (int).
+o	Names (free-text or list).
+Status Values
+•	INCOMPLETE_PROFILE
+•	PENDING_VERIFICATION
+•	PENDING_APPROVAL
+•	APPROVED
+•	DECLINED
+•	CANCELLED / WITHDRAWN
+2.5.4. Email Verification
+•	When a visit is created:
+o	If email not verified:
+	System sends verification email with OTP or magic link.
+•	Verification methods:
+o	Option A (OTP):
+	Email contains 6-digit OTP.
+	Visitor enters OTP in kiosk.
+o	Option B (Magic link):
+	Visitor clicks link from own device; backend marks email verified.
+•	On verification:
+o	If approval required:
+	Visit → PENDING_APPROVAL.
+o	If no approval required:
+	Visit → APPROVED.
+2.5.5. Approval Rules
+•	Admin config:
+o	approval_required: boolean (default: true).
+o	approval_recipient:
+	HOST
+	SECURITY_EMAIL
+	BOTH
+o	security_approval_email: text.
+•	When approval required:
+o	Email goes to chosen recipient(s).
+o	A click on Approve/Decline triggers backend update & logs action.
+2.5.6. Auto-Cancellation
+•	Logic:
+o	If INCOMPLETE_PROFILE > 24 hours → CANCELLED.
+•	(Optional config for v1):
+o	auto_cancel_incomplete_after_hours: default 24.
+2.5.7. Admin Dashboard Features
+•	Home / Today View
+o	Table:
+	Visitor Name
+	Visitor Company
+	Host
+	Purpose
+	Branch
+	Visit Time
+	Valid Until
+	Status
+	Actions (View / Edit / Approve / Decline / Cancel)
+•	Filters & Search
+o	By date range, branch, host, status, purpose.
+•	Visit Detail View
+o	All visitor & visit fields.
+o	Photos and ID/card.
+o	Status timeline with timestamps & actor.
+•	Config Screens
+o	Field config (mandatory/optional/hidden toggles).
+o	Approval rules.
+o	Validity options.
+o	Purpose list (CRUD).
+•	Email Template Management
+o	Per template type:
+	Name, subject, body.
+	Placeholders allowed ({{visitor_name}}, {{host_name}}, etc.).
+•	Reports & Export
+o	Visit counts by:
+	Date.
+	Branch.
+	Host.
+	Visitor company.
+o	Export to CSV of:
+	All raw visits with all fields & statuses in date range.
+________________________________________
+2.6. Non-Functional Requirements
+•	Performance
+o	Kiosk flow: page loads < 2 seconds on decent connection.
+o	Admin table listings: respond under ~3 seconds for typical month (~thousands of rows).
+•	Security
+o	RLS enforced per company.
+o	Signed URLs for photos.
+o	Email tokens time-limited and single-use.
+•	Reliability
+o	Email send failures are logged.
+o	Admin can manually resend verification and approval emails.
+•	Scalability
+o	DB & schema designed to support many branches & companies later.
+•	Auditability
+o	visit_status_history table recording:
+	Visit ID.
+	Old status → new status.
+	Timestamp.
+	Actor (admin ID, host email, system).
+
