@@ -24,6 +24,23 @@ export default async function AdminLayout({
         redirect('/admin/login')
     }
 
+    // Check if user has ADMIN role
+    const { data: adminUser } = await supabase
+        .from('admins')
+        .select('role')
+        .eq('auth_user_id', user.id)
+        .single()
+
+    if (!adminUser || adminUser.role !== 'ADMIN') {
+        // If they are KIOSK, send them to kiosk
+        if (adminUser?.role === 'KIOSK') {
+            redirect('/visit')
+        }
+        // Otherwise, sign out and go to login
+        await supabase.auth.signOut()
+        redirect('/admin/login')
+    }
+
     const navItems = [
         { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/admin/visits', label: 'Visits', icon: Calendar },

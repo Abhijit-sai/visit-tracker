@@ -50,10 +50,24 @@ export async function middleware(request: NextRequest) {
         }
     }
 
+    // Protect /visit routes (Kiosk)
+    if (request.nextUrl.pathname.startsWith('/visit') && request.nextUrl.pathname !== '/visit/login') {
+        if (!user) {
+            return NextResponse.redirect(new URL('/visit/login', request.url))
+        }
+    }
+
     // Redirect logged-in admins away from login page
     if (request.nextUrl.pathname === '/admin/login') {
         if (user) {
             return NextResponse.redirect(new URL('/admin', request.url))
+        }
+    }
+
+    // Redirect logged-in kiosk users away from login page
+    if (request.nextUrl.pathname === '/visit/login') {
+        if (user) {
+            return NextResponse.redirect(new URL('/visit', request.url))
         }
     }
 

@@ -19,7 +19,8 @@ on conflict do nothing;
 -- For now, we insert a placeholder or you can update this after creating the user.
 insert into admins (id, organization_id, name, email, role)
 values
-  ('c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'System Admin', 'admin@acme.com', 'ADMIN')
+  ('c1eebc99-9c0b-4ef8-bb6d-6bb9bd380c44', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'System Admin', 'admin@acme.com', 'ADMIN'),
+  ('c2eebc99-9c0b-4ef8-bb6d-6bb9bd380c55', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'Kiosk Display', 'kiosk@acme.com', 'KIOSK')
 on conflict do nothing;
 
 -- 4. Organization Config
