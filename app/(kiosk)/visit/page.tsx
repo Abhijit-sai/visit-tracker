@@ -1,9 +1,16 @@
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
+import { createClient } from '@/lib/supabase/server'
+import KioskUserProfile from '@/components/KioskUserProfile'
 
-export default function KioskLandingPage() {
+export default async function KioskLandingPage() {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white flex flex-col items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white flex flex-col items-center justify-center p-4 relative">
+            {user && <KioskUserProfile email={user.email || 'User'} />}
+
             <div className="max-w-2xl w-full text-center space-y-12">
                 <div className="space-y-4">
                     <h1 className="text-5xl md:text-7xl font-bold tracking-tight">

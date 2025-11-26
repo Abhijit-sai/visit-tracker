@@ -32,9 +32,9 @@ export default async function AdminLayout({
         .single()
 
     if (!adminUser || adminUser.role !== 'ADMIN') {
-        // If they are KIOSK, send them to kiosk
+        // If they are KIOSK, send them to unauthorized page (so they can logout)
         if (adminUser?.role === 'KIOSK') {
-            redirect('/visit')
+            redirect('/unauthorized')
         }
         // Otherwise, sign out and go to login
         await supabase.auth.signOut()
